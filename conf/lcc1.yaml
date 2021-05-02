@@ -1,0 +1,7 @@
+id: "01990203"
+desc: "这个是启动一个LCC进程的配置, 1号线LCC服务器3"
+type: "LCC"
+parent_id: "99000101"
+port: 9992
+timeout_sec: 60
+redis_addr: "127.0.0.1:6379"

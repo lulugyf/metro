@@ -1,0 +1,7 @@
+id: "01021503"
+desc: "这个是启动一个SLE进程的配置, 代表一号线第2个车站第3台进站 AGM"
+type: "SLE"
+parent_id: "01020304"
+port: 9994
+timeout_sec: 60
+redis_addr: "127.0.0.1:6379"

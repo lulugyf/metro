@@ -1,0 +1,7 @@
+id: "01020304"
+desc: "这个是启动一个SC进程的配置, 代表1号线第2个车站 服务器4"
+type: "SC"
+parent_id: "01990203"
+port: 9993
+timeout_sec: 60
+redis_addr: "127.0.0.1:6379"

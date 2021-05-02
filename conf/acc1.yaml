@@ -1,0 +1,7 @@
+id: "99000101"
+type: "ACC"
+desc: "这个是启动一个ACC进程的配置"
+parent_id: ""
+port: 9991
+redis_addr: "127.0.0.1:6379"
+timeout_sec: 60

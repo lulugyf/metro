@@ -1,0 +1,13 @@
+name: "model-name"
+desc: "description content"
+catagory: "类别名称"
+dependencies:
+  - pkg: "pkg-name"
+    ver: "<min-ver>"
+    max_ver: "<max-ver> (optional)"
+  - pkg: "pkg-name1"
+    ver: "<min-ver>"
+  - pkg: "pkg-name2"
+predict_dependencies:
+  - pkg: "pkg-name"
+    ver: "<min-ver>"
