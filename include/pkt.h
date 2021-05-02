@@ -124,5 +124,19 @@ class P2001 : public _BodyBase{
 class P2001A : public _BodyBase{};
 */
 
+// 指令报文，  用于向服务器发送指令yaml内容
+class P1999 : public _BodyBase{
+    public:
+        string yaml;  //yaml报文内容
+
+        virtual uint16_t type() { return 0x1999; }
+        virtual uint32_t len();
+        virtual int encode(ACE_OutputCDR &cdr) ;
+        virtual int decode(ACE_InputCDR  &cdr) ;
+
+        void setTime(long long sec=0);
+};
+class P1999A : public _BodyBase{}; // 应答报文
+
 #endif
 

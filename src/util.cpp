@@ -5,6 +5,7 @@
 #include "loguru.hpp"
 
 #include <iostream>
+#include <vector>
 using namespace std;
 
 int splitc(char *string, char *fields[], int  nfields, char sep )
@@ -21,6 +22,22 @@ int splitc(char *string, char *fields[], int  nfields, char sep )
         p = p1; i++;
     }
     return i;
+}
+
+void SplitString(const string& s, vector<string>& v, const string& c)
+{
+  string::size_type pos1, pos2;
+  pos2 = s.find(c);
+  pos1 = 0;
+  while(string::npos != pos2)
+  {
+    v.push_back(s.substr(pos1, pos2-pos1));
+ 
+    pos1 = pos2 + c.size();
+    pos2 = s.find(c, pos1);
+  }
+  if(pos1 != s.length())
+    v.push_back(s.substr(pos1));
 }
 
 Redis::Redis(const char *addr, const char *pswd){
@@ -80,17 +97,17 @@ int Redis::setKey(const char *key, const char *val){
 string Redis::getKey(const char *key){
     redisReply *reply;
     reply = (redisReply *)redisCommand(c, "GET %s", key);
+    if(reply == NULL) {
+        LOG_F(ERROR, "redis getKey failed [%s]", c->errstr);
+        return string("");
+    }
+    string r(reply->str);
     //cout << "get foo: ---- " << reply->str << endl;
     freeReplyObject(reply);
-    if(reply->str[0] == 0) {
-        return "";
-    }else{
-        return string(reply->str);
-    }
+    return r;
 }
 bool Redis::isOk() {
     if(c == NULL)
         return false;
     return true;
 }
-

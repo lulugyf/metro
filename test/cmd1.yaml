@@ -1,0 +1,5 @@
+cmd_id: 0x3001
+desc: "降级运营模式命令: 目标车站id， 操作员ID， 降级模式id(4.6章节)"
+id_dst: "01020304"
+oper_id: "operator"
+mode: 0x01

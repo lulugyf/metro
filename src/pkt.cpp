@@ -205,8 +205,10 @@ void P3001::setTime(long long sec) {
 int _Pkt::encode(ACE_OutputCDR &cdr){
     cdr.reset_byte_order(__BYTE_ORDER__);
     ACE_CDR::Short length = header.len();
-    if(body != NULL)
+    if(body != NULL){
         length += body->len();
+        cout << " encode body.len: " << body->len() << endl; 
+    }
     length += sizeof(checksum);
     cout << " encode header len:" << length << " pkt ptr:" << cdr.total_length() << endl;
 
@@ -227,6 +229,30 @@ int _Pkt::encode(ACE_OutputCDR &cdr){
 
     return cdr.good_bit();
 }
+
+
+int P1999::encode(ACE_OutputCDR &cdr) {
+    ACE_CDR::Short len = yaml.length();
+    cdr << len;  // 这里很妖怪， 字节数增加了3， 所以修改了 ::len 中内容
+    cout << " write a short:" << cdr.total_length() << " " << sizeof( ACE_CDR::Short ) << endl;
+    cdr.write_char_array(yaml.c_str(), yaml.length());
+    return cdr.good_bit();
+};
+uint32_t P1999::len() {
+     return 3+yaml.length();
+}
+
+int P1999::decode(ACE_InputCDR  &cdr) {
+    ACE_CDR::Short len;
+    cout << "decode before len: " << cdr.length() << endl;
+    cdr >> len;
+    cout << "decode after len: " << cdr.length() << " len:" << len << endl;
+    char *c = new char[len+1];
+    cdr.read_char_array(c, len); c[len] = 0;
+    yaml = c;
+    delete c;
+    return cdr.good_bit();
+};
 
 /*
 int _Pkt::decode(ACE_InputCDR &cdr) {
@@ -285,6 +311,7 @@ int _Pkt::encodeAck(ACE_OutputCDR &cdr,  uint8_t ack){
 }
 
 
+
 void test_pkt() {
     /*
     P3001 *p1 = new P3001();
@@ -336,6 +363,8 @@ void test_pkt() {
 
 
 }
+
+
 
 #ifdef __TEST__
 int ACE_TMAIN (int argc, ACE_TCHAR *argv[])

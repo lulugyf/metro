@@ -4,17 +4,19 @@
 
 #include "comm.h"
 #include "util.h"
-#include "loguru.hpp"
 
 #include "pkt_def.h"
 #include "yaml-cpp/yaml.h"
+#include "busi.h"
 
+#include "loguru.hpp"
 #include "ace/OS_NS_unistd.h"
 #include "ace/OS_NS_stdlib.h"
 
 #include <string>
 #include <map>
 #include <time.h>
+#include <thread>
 
 using namespace std;
 
@@ -26,6 +28,7 @@ class ConnHandler
         ConnHandler() {
             msg = new ACE_Message_Block (MAX_PKT_SIZE);
             time(&active_time);
+            pthread_mutex_init(&wr_mutex, NULL);
         };
         ConnHandler(int sock): ConnHandler() { _sock = sock; };
         virtual ~ConnHandler();
@@ -34,11 +37,13 @@ class ConnHandler
             remote_addr = addr;
         }
         string &getAddr() { return remote_addr; }
-        int readData();
+        int readData(_Pkt **);
         int writeData(_Pkt *p);
         void setLocalId(const char *id) { strcpy(local_id, id); };
+        const char *getId() { return remote_id; };
+
         virtual int check(time_t *t);
-        virtual int process_pkt();
+        virtual _Pkt *process_pkt();
 
     protected:
         int _sock = -1;
@@ -47,6 +52,7 @@ class ConnHandler
         time_t active_time; // 活动时间
         u_int pkt_seq_seed = 0;  // 报文发送种子 
         ACE_Message_Block *msg = NULL; ///接收报文缓存
+        pthread_mutex_t wr_mutex; // 写锁
 
     private:
         string remote_addr;
@@ -59,7 +65,7 @@ class ParentConnHandler: public ConnHandler {
         ~ParentConnHandler();
 
         virtual int check(time_t *t); // 超时检查， 以便发送链路检测包
-        virtual int process_pkt();
+        virtual _Pkt *process_pkt();
         int connect(); // 建立连接
         bool connected() { return _sock >= 0; }; // 是否已经连接
         void disconnect() { tcp_close(_sock); _sock = -1; msg->reset(); }
@@ -74,7 +80,7 @@ class ParentConnHandler: public ConnHandler {
 };
 
 
-class Loop_Server
+class Loop_Server: public BusiCallBack
 {
 public:
   // Template Method that runs logging server's event loop.
@@ -91,18 +97,24 @@ public:
     // Close the socket endpoint.
     ~Loop_Server ();
 
+    virtual int sendUp(_Pkt *p); //向上级发送消息
+    virtual int sendDown(_Pkt *p, char *id_dst=NULL); //向下级节点发送消息， 如果id_dst 为NULL, 则是向所有在线的下级发送
+    virtual const char *getId(); 
+
 private:
     bool reg();
 
 private:
+    pthread_mutex_t wr_mutex; // 保护数据结构， 主要是对 conns 的遍历或修改
     int listen_sock = -1;
     map<int, ConnHandler *> conns;
     ParentConnHandler *parent_conn = NULL; // 到上级服务器的连接
     YAML::Node conf;
     char id[9] = {0};   // 本服务器id
     int port;    // 监听端口
-    int dev_type; // 本服务器类型
+    int dev_type; // 本服务器类型  
     Redis *redis; // 连接的 redis 服务
+    wqueue<_Pkt *> *m_queue;
 };
 
 #endif /* _MAIN_H */

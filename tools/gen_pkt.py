@@ -48,6 +48,7 @@ public:
 
 def gen_header(fout):
     print('''
+////// !! Do not modify this file, It was generated, Directly modify will be overwritten.
 #ifndef __PKT_IMPL_H
  #define __PKT_IMPL_H
 #include "pkt.h"
@@ -80,6 +81,7 @@ def gen_header(fout):
 
 def gen_src(fout):
     print('''
+////// !! Do not modify this file, It was generated, Directly modify will be overwritten.
 #include "pkt_def.h"
 #include "loguru.hpp"
 
@@ -152,6 +154,11 @@ int _Pkt::decode(ACE_InputCDR &cdr) {
         p = (header.ack_flag == 0x00) ? (_BodyBase *)new P%s() : (_BodyBase *)new P%sA();''' %(
                     pid, pid, pid),
          file=fout)
+
+    # 手工编写的报文class， 需要在这里添加记录
+    print('''    }else if(header.type == 0x1999){
+    p = (header.ack_flag == 0x00) ? (_BodyBase *)new P1999() : (_BodyBase *)new P1999A();''',
+        file=fout)
 
     print('''    }
     if(p == NULL){
@@ -229,7 +236,7 @@ int P3001::decode(ACE_InputCDR  &cdr) {
 
         
 
-with open("include/pkt_def.h", "w", encoding="utf8") as fo:
+with open("../include/pkt_def.h", "w", encoding="utf8") as fo:
     gen_header(fo)
-with open("src/pkt_def.cpp", "w", encoding="utf8") as fo:
+with open("../src/pkt_def.cpp", "w", encoding="utf8") as fo:
     gen_src(fo)

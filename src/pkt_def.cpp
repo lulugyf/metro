@@ -1,4 +1,5 @@
 
+////// !! Do not modify this file, It was generated, Directly modify will be overwritten.
 #include "pkt_def.h"
 #include "loguru.hpp"
 
@@ -125,6 +126,8 @@ int _Pkt::decode(ACE_InputCDR &cdr) {
         p = (header.ack_flag == 0x00) ? (_BodyBase *)new P3002() : (_BodyBase *)new P3002A();
     }else if(header.type == 0x3004){
         p = (header.ack_flag == 0x00) ? (_BodyBase *)new P3004() : (_BodyBase *)new P3004A();
+    }else if(header.type == 0x1999){
+    p = (header.ack_flag == 0x00) ? (_BodyBase *)new P1999() : (_BodyBase *)new P1999A();
     }
     if(p == NULL){
         LOG_F(ERROR, "invalid received pkt type: 0x%x", header.type);

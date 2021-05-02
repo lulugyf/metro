@@ -1,7 +1,7 @@
 
 .SUFFIXES: .cpp .cc .c .o
 
-all: main
+all: main sendcmd
 
 ACE_ROOT=/d/dev/ace/ACE_wrappers
 
@@ -42,7 +42,13 @@ inc=../include
 .obj/pkt.o: $(inc)/pkt.h
 .obj/pkt_def.o: $(inc)/pkt.h $(inc)/pkt_def.h
 .obj/pkt_def.o: $(inc)/pkt.h $(inc)/pkt_def.h $(inc)/main.h
+.obj/main.o: $(inc)/main.h $(inc)/busi.h $(inc)/pkt.h $(inc)/busi.h
+.obj/busi.o: $(inc)/busi.h $(inc)/pkt.h $(inc)/pkt_def.h
 
+SRC2=pkt.cpp pkt_def.cpp loguru.cpp md5.cpp comm.cpp util.cpp sendcmd.cpp
+OBJS2 = $(patsubst %.cpp,.obj/%.o,$(SRC2))
+sendcmd: $(OBJS2)
+	g++ $(LDFLAGS) -o $@ $(OBJS2) $(LIBS)
 
 share: $(OBJS1)
 	g++ $(LDFLAGS) -o share.dll $(OBJS1) -s -shared -Wl,--subsystem,windows $(LIBS)

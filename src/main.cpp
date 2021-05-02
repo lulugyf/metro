@@ -1,18 +1,34 @@
 #include "main.h"
 
-#include "busi.h"
-
 #include <memory>
 
 #define MAX_CLIENT 50
 
+
+static int sendPkt(int sock, _Pkt *p) {
+    ACE_OutputCDR payload (MAX_PKT_SIZE);
+    p->encode(payload);
+    return tcp_writen(sock, payload.begin()->rd_ptr(), payload.total_length());
+}
 
 Loop_Server::Loop_Server(const char *_conf) {
     conf = YAML::LoadFile( _conf );
 
     strcpy(id, conf["id"].as<string>().c_str());
     port = conf["port"].as<int>();
-
+    m_queue = new wqueue<_Pkt *>();
+    string dtype = conf["type"].as<string>();
+    if(dtype == "ACC")
+        dev_type = DEVTP_ACC;
+    else if(dtype == "LCC")
+        dev_type = DEVTP_LCC;
+    else if(dtype == "SC")
+        dev_type = DEVTP_SC;
+     else if(dtype == "SLE")
+        dev_type = DEVTP_SLE;
+    else
+        LOG_F(ERROR, "invalid device type: %s", dtype.c_str());
+    pthread_mutex_init(&wr_mutex, NULL);
     redis = new Redis(conf["redis_addr"].as<string>().c_str(), "");
 }
 
@@ -28,6 +44,7 @@ Loop_Server:: ~Loop_Server () {
         //out<< it->first << " " << it->second << endl; //Printing the values after inserting
         delete it->second;
     }
+    delete m_queue;
 
     if(redis != NULL)
         delete redis;
@@ -51,11 +68,14 @@ int Loop_Server::handle_connections (int sock, const char *client_addr) {
 }
 
 int Loop_Server::handle_data (int sock){
-
+    _Pkt *pp;
     if(parent_conn != NULL && parent_conn->handler() == sock){
-        if(parent_conn->readData() == -1){
+        if(parent_conn->readData(&pp) == -1){
             LOG_F(ERROR, "parent conn read data failed, disconnect it.");
             parent_conn->disconnect();
+        }else{
+            if(pp != NULL)
+                m_queue->add(pp); // 将报文交给业务逻辑处理
         }
         return 0;
     }
@@ -68,10 +88,17 @@ int Loop_Server::handle_data (int sock){
         return -1;
     }
     ConnHandler *c = it->second;
-    if(c->readData() == -1) {
-        LOG_F(INFO, "ERROR: client read failed of %s", c->getAddr().c_str());
+    if(c->readData(&pp) == -1) {
+        LOG_F(INFO, "ERROR: client [%s] read failed of %s",
+            c->getId(),
+             c->getAddr().c_str());
         delete c;
         conns.erase(it);
+    }else{
+        if(pp != NULL){
+            LOG_F(INFO, "add pkt to queue......");
+            m_queue->add(pp); // 将报文交给业务逻辑处理
+        }
     }
 }
 
@@ -124,9 +151,16 @@ ConnHandler:: ~ ConnHandler() {
 }
 
 // 读取数据， 如果失败， 则返回 -1
-int ConnHandler::readData() {
+/** 
+ * 返回值含义：
+ *    -1:  读取失败， 应该关闭
+ *    0:   无需进一步处理
+ * 函数返回时如果 *pp != NULL,  则报文返回给上层逻辑处理
+ * */
+int ConnHandler::readData(_Pkt **pp) {
     u_short pkt_len = 0;
     int r;
+    *pp = NULL;
 
     // 2字节包长度
     if(msg->total_length() > 1){
@@ -159,20 +193,20 @@ int ConnHandler::readData() {
     }
     msg->wr_ptr(r);
     if(msg->total_length() >= pkt_len + 2) {
-        process_pkt();
+        *pp = process_pkt();
         msg->reset();
         time(&active_time);
     }
     return 0;
 }
 
-int ConnHandler::process_pkt() {
+_Pkt * ConnHandler::process_pkt() {
     auto_ptr<_Pkt> p (new _Pkt() );
 
     ACE_InputCDR cdr(msg);
     if(p->decode(cdr) != 0){
         LOG_F(ERROR,  "invalid package");
-        return -1;
+        return NULL;
     }else{
         LOG_F(INFO, "receive pkt type: 0x%x", p->header.type);
     }
@@ -187,20 +221,38 @@ int ConnHandler::process_pkt() {
             p->encodeAck(payload, 0);
             int r = tcp_writen(_sock, payload.begin()->rd_ptr(), payload.total_length());
             LOG_F(INFO, "reply link test of %s, write %d bytes", remote_id, r);
-            return 0;
+            return NULL;
         }else{
             LOG_F(INFO, "received 2001 ack");
-            return 0;
+            return NULL;
+        }
+    }else if(p->header.type == 0x1999) { // 人工下发的指令， 应答后继续处理
+        if( p->header.ack_flag == 0x00){ 
+            ACE_OutputCDR payload (MAX_PKT_SIZE);
+            p->encodeAck(payload, 0);
+            int r = tcp_writen(_sock, payload.begin()->rd_ptr(), payload.total_length());
+            if(r <= 0) {
+                LOG_F(ERROR, "send reply failed: %d", r);
+            }else
+                LOG_F(INFO, "reply sendcmd");
+            // 这里函数不返回， 报文要交给后续的业务处理。
         }
     }
-    // TODO 接收报文的业务逻辑处理,  从下级设备发上来的报文
-    return 0;
+    // done 接收报文的业务逻辑处理,  从下级设备发上来的报文
+    return p.release();
+    // return 0;
 }
 
 int ConnHandler::writeData(_Pkt *p) {
     ACE_OutputCDR payload (MAX_PKT_SIZE);
+    if(p->header.ack_flag == 0x00)
+        p->header.pkt_seq = ++ pkt_seq_seed; //请求报文更新其seq
     p->encode(payload);
+
+    // 加入写锁， 避免写入报文错位
+    pthread_mutex_lock(&wr_mutex);
     int r = tcp_writen(_sock, payload.begin()->rd_ptr(), payload.total_length());
+    pthread_mutex_unlock(&wr_mutex);
     LOG_F(INFO, "write pkt of 0x%x ,  written %d bytes", p->header.type, r);
     return r;
 }
@@ -244,14 +296,14 @@ int ParentConnHandler::check(time_t *t){
     return 0;
 }
 
-int ParentConnHandler::process_pkt(){
+_Pkt * ParentConnHandler::process_pkt(){
     test_count = 0;
     auto_ptr<_Pkt> p (new _Pkt() );
 
     ACE_InputCDR cdr(msg);
     if(p->decode(cdr) != 0){
         LOG_F(ERROR,  "invalid package");
-        return -1;
+        return NULL;
     }else{
         LOG_F(INFO, "receive pkt type: 0x%x", p->header.type);
     }
@@ -260,11 +312,11 @@ int ParentConnHandler::process_pkt(){
             LOG_F(ERROR, "invalid link test from parent!");
         }else{
             LOG_F(INFO, "received 2001 ack");
-            return 0;
         }
+        return NULL;
     }
-    // TODO 接收报文的业务逻辑处理,  从上级设备发来的报文
-    return 0;
+    // done 接收报文的业务逻辑处理,  从上级设备发来的报文
+    return p.release();
 }
 
 // 连接到上级服务器并发送一个链路探测包
@@ -305,7 +357,6 @@ int ParentConnHandler::sendLinkTest() {
     p.setBody(b);
     strcpy(p.header.id_dst, remote_id);
     strcpy(p.header.id_src, local_id);
-    p.header.pkt_seq = ++ pkt_seq_seed;
 
     return writeData(&p);
 }
@@ -335,6 +386,28 @@ int test_send_pkt() {
     tcp_close(sd);
 }
 
+int Loop_Server::sendUp(_Pkt *p){//向上级发送消息
+    if(parent_conn != NULL && parent_conn->connected())
+        return parent_conn->writeData(p);
+    return 0;
+}
+
+int Loop_Server::sendDown(_Pkt *p, char *id_dst){ // 向下级设备发送报文
+    map<int, ConnHandler *>::iterator it;
+    ConnHandler *c;
+    for (it = conns.begin(); it != conns.end(); it++) {
+        c = it->second;
+        if(id_dst == NULL || strcmp(c->getId(), id_dst) == 0){
+            if(c->getId()[0] != 0) // 只向有标识的客户端下发
+                c->writeData(p);
+        }
+    }
+    return 0;
+}
+
+const char *Loop_Server::getId(){
+    return id;
+}
 
 // 主循环
 int Loop_Server::run (){
@@ -366,10 +439,20 @@ int Loop_Server::run (){
 
     // 启动逻辑处理线程
     LOG_F(INFO, "starting a thread");
-    BusiProc proc;
-    thread t(proc);
-    t.join();
-    LOG_F(INFO, "thread exited");
+    thread t;
+    if(dev_type == DEVTP_ACC)
+        t = thread(ACCBusi( m_queue, (BusiCallBack *)this));
+    else if(dev_type == DEVTP_LCC)
+        t = thread(LCCBusi( m_queue, (BusiCallBack *)this ) );
+    else if(dev_type == DEVTP_SC) 
+        t = thread(SCBusi(m_queue, (BusiCallBack *)this));
+    else if(dev_type == DEVTP_SLE)
+        t = thread(SLEBusi(m_queue, (BusiCallBack *)this));
+    else
+        LOG_F(ERROR, "invalid device type %d", dev_type);
+    //thread t(proc);
+    // t.join();
+    // LOG_F(INFO, "thread exited");
     
     int i = 0, rcount = 0;
     map<int, ConnHandler *>::iterator it;
@@ -417,7 +500,8 @@ int Loop_Server::run (){
         }
         handle_check();
 
-    } 
+    }
+    t.join();
     return 0;  
 }
 
